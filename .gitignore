@@ -1,0 +1,5 @@
+work/
+lean/.lake/
+diff-tests/out/
+diff-tests/repos/
+*.o
