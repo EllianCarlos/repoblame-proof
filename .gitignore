@@ -3,3 +3,4 @@ lean/.lake/
 diff-tests/out/
 diff-tests/repos/
 *.o
+diff-tests/errors-lane*.log

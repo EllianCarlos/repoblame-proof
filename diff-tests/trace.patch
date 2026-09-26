@@ -1,0 +1,371 @@
+diff --git a/src/libgit2/blame_git.c b/src/libgit2/blame_git.c
+index 3f2a1c9fd..858232d67 100644
+--- a/src/libgit2/blame_git.c
++++ b/src/libgit2/blame_git.c
+@@ -1251,6 +1251,40 @@ static void copy_split_if_better(
+  * Ported from git.git's `handle_split` in builtin/blame.c at
+  * https://github.com/git/git/blob/35936f8fc38a214cc7d2595070641d39a541dfb1/builtin/blame.c#L861-L892
+  */
++#ifdef RB_TRACE
++/* Trace for the Lean replay (repoblame-proof/diff-tests). */
++static int rbt_capture;
++static size_t rbt_nreg, rbt_alloc;
++static size_t *rbt_reg;
++
++static void rbt_add(size_t t, size_t p, size_t n)
++{
++	if (!rbt_capture)
++		return;
++	if (rbt_nreg == rbt_alloc) {
++		rbt_alloc = rbt_alloc ? rbt_alloc * 2 : 64;
++		rbt_reg = realloc(rbt_reg, rbt_alloc * 3 * sizeof(size_t));
++	}
++	rbt_reg[3 * rbt_nreg] = t;
++	rbt_reg[3 * rbt_nreg + 1] = p;
++	rbt_reg[3 * rbt_nreg + 2] = n;
++	rbt_nreg++;
++}
++
++static FILE *rbt_file(void)
++{
++	static FILE *f;
++	static int tried;
++	if (!tried) {
++		const char *p = getenv("RB_TRACE_FILE");
++		tried = 1;
++		if (p)
++			f = fopen(p, "a");
++	}
++	return f;
++}
++#endif
++
+ static void handle_split(
+ 		git_blame *blame,
+ 		git_blame__entry *ent,
+@@ -1264,6 +1298,9 @@ static void handle_split(
+ 		return;
+ 	if (tlno < same) {
+ 		git_blame__entry potential[3] = {{0}};
++#ifdef RB_TRACE
++		rbt_add(tlno, plno, same - tlno);
++#endif
+ 		tlno += ent->s_lno;
+ 		same += ent->s_lno;
+ 		split_overlap(potential, ent, tlno, plno, same, parent);
+@@ -1647,6 +1684,76 @@ static void blame_entry_lines_free(blame_entry_lines *l)
+ 	git__free(l->score);
+ }
+ 
++#ifdef RB_TRACE
++static void rbt_lines(FILE *f, const char *buf, size_t size)
++{
++	uint64_t *h = NULL;
++	unsigned *sc = NULL;
++	size_t n = 0, i;
++
++	if (buf && blame_hash_lines(&h, &sc, &n, buf, size) < 0)
++		n = 0;
++	fprintf(f, " %zu", n);
++	for (i = 0; i < n; i++)
++		fprintf(f, " %016llx:%u", (unsigned long long)h[i], sc[i]);
++	git__free(h);
++	git__free(sc);
++}
++
++static void rbt_entry(FILE *f, git_blame *blame, git_blame__entry *e)
++{
++	blame_entry_lines l;
++	size_t i;
++
++	if (blame_entry_lines_init(&l, blame, e) < 0) {
++		fprintf(f, " ERR");
++		blame_entry_lines_free(&l);
++		return;
++	}
++	fprintf(f, " %zu", l.count);
++	for (i = 0; i < l.count; i++)
++		fprintf(f, " %016llx:%u", (unsigned long long)l.hash[i], l.score[i]);
++	blame_entry_lines_free(&l);
++}
++
++static int find_copy_in_blob(git_blame *, git_blame__entry *,
++	git_blame__origin *, git_blame__entry *, mmfile_t *);
++
++static void rbt_regions(FILE *f, git_blame *blame, git_blame__entry *e,
++	git_blame__origin *o, mmfile_t *fp)
++{
++	git_blame__entry tmp[3];
++	size_t k;
++	int err;
++
++	memset(tmp, 0, sizeof(tmp));
++	rbt_capture = 1;
++	rbt_nreg = 0;
++	err = find_copy_in_blob(blame, e, o, tmp, fp);
++	rbt_capture = 0;
++	decref_split(tmp);
++	if (err < 0) {
++		fprintf(f, " ERR");
++		return;
++	}
++	fprintf(f, " %zu", rbt_nreg);
++	for (k = 0; k < rbt_nreg; k++)
++		fprintf(f, " %zu,%zu,%zu", rbt_reg[3 * k], rbt_reg[3 * k + 1],
++			rbt_reg[3 * k + 2]);
++}
++
++static void rbt_best(FILE *f, git_blame *blame, size_t j,
++	git_blame__entry *ent, git_blame__entry *split, size_t src)
++{
++	if (!split[1].suspect || !src)
++		fprintf(f, "B %zu none\n", j);
++	else
++		fprintf(f, "B %zu %zu %zu %zu %zu %u\n", j, src - 1,
++			split[1].lno - ent->lno, split[1].s_lno, split[1].num_lines,
++			blame_entry_score(blame, &split[1]));
++}
++#endif
++
+ /*
+  * Whether the xdiff of the lines `l` against the source `s` can give a
+  * split that scores above `threshold`.  A split is one run of lines that
+@@ -1732,6 +1839,15 @@ static int find_move_in_parent(
+ 			(size_t)file_p.size)) < 0)
+ 		return error;
+ 
++#ifdef RB_TRACE
++	if (rbt_file()) {
++		fprintf(rbt_file(), "MS %u %d %d", threshold, (int)filter.filtered,
++			!(blame->options.flags & GIT_BLAME_IGNORE_WHITESPACE) &&
++			(size_t)file_p.size <= GIT_XDIFF_MAX_SIZE);
++		rbt_lines(rbt_file(), file_p.ptr, (size_t)file_p.size);
++		fprintf(rbt_file(), "\n");
++	}
++#endif
+ 	for (e = blame->ent; e; ) {
+ 		if (e->guilty || !same_suspect(e->suspect, target) ||
+ 		    blame_entry_score(blame, e) <= threshold) {
+@@ -1739,6 +1855,23 @@ static int find_move_in_parent(
+ 			continue;
+ 		}
+ 
++#ifdef RB_TRACE
++		if (rbt_file()) {
++			fprintf(rbt_file(), "ME");
++			rbt_entry(rbt_file(), blame, e);
++			rbt_regions(rbt_file(), blame, e, parent, &file_p);
++			if (filter.filtered) {
++				blame_entry_lines tl;
++				bool cm = true;
++				if (blame_entry_lines_init(&tl, blame, e) == 0)
++					cm = blame_source_can_match(&filter, &tl, threshold);
++				blame_entry_lines_free(&tl);
++				fprintf(rbt_file(), " %d\n", !cm);
++			} else {
++				fprintf(rbt_file(), " -\n");
++			}
++		}
++#endif
+ 		if (filter.filtered) {
+ 			blame_entry_lines lines;
+ 			bool can_match;
+@@ -1782,6 +1915,16 @@ static int find_move_in_parent(
+ 			PROF_STOP(P_MOVE_XDIFF);
+ 		}
+ 
++#ifdef RB_TRACE
++		if (rbt_file()) {
++			if (!error && split[1].suspect)
++				fprintf(rbt_file(), "MT %zu %zu %zu %u\n",
++					split[1].lno - e->lno, split[1].s_lno,
++					split[1].num_lines, blame_entry_score(blame, &split[1]));
++			else
++				fprintf(rbt_file(), "MT none\n");
++		}
++#endif
+ 		if (!error && split[1].suspect &&
+ 		    blame_entry_score(blame, &split[1]) > threshold) {
+ 			/*
+@@ -1942,6 +2085,22 @@ static int find_best_copies_in_diff(
+ 	size_t i, j;
+ 	int error = 0;
+ 	PROF_VARS;
++#ifdef RB_TRACE
++	FILE *tf = rbt_file();
++	size_t si = 0, *bsrc = NULL;
++
++	if (tf) {
++		fprintf(tf, "R D %u %zu %d\n", blame_copy_score(blame),
++			git_array_size(*candidates),
++			!(blame->options.flags & GIT_BLAME_IGNORE_WHITESPACE));
++		git_array_foreach(*candidates, j, c) {
++			fprintf(tf, "C %zu", j);
++			rbt_entry(tf, blame, c->ent);
++			fprintf(tf, "\n");
++		}
++		bsrc = git__calloc(git_array_size(*candidates) + 1, sizeof(size_t));
++	}
++#endif
+ 
+ 	for (i = 0; i < git_diff_num_deltas(diff); i++) {
+ 		const git_diff_delta *delta = git_diff_get_delta(diff, i);
+@@ -1958,9 +2117,26 @@ static int find_best_copies_in_diff(
+ 		PROF_COUNT(prof_copy_bytes, git_blob_rawsize(norigin->blob));
+ 
+ 		fill_origin_blob(norigin, &file_p);
++#ifdef RB_TRACE
++		if (tf) {
++			char hex[GIT_OID_MAX_HEXSIZE + 1];
++			git_oid_tostr(hex, sizeof(hex), &delta->old_file.id);
++			fprintf(tf, "S %zu %s %d", si, hex,
++				(size_t)file_p.size <= GIT_XDIFF_MAX_SIZE);
++			rbt_lines(tf, file_p.ptr, (size_t)file_p.size);
++			fprintf(tf, "\n");
++		}
++#endif
+ 
+ 		git_array_foreach(*candidates, j, c) {
+ 			memset(potential, 0, sizeof(potential));
++#ifdef RB_TRACE
++			if (tf) {
++				fprintf(tf, "P %zu %zu - -", si, j);
++				rbt_regions(tf, blame, c->ent, norigin, &file_p);
++				fprintf(tf, "\n");
++			}
++#endif
+ 
+ 			PROF_START();
+ 			error = find_copy_in_blob(blame, c->ent, norigin,
+@@ -1975,6 +2151,10 @@ static int find_best_copies_in_diff(
+ #endif
+ 			if (error == 0)
+ 				copy_split_if_better(blame, c->split, potential);
++#ifdef RB_TRACE
++			if (tf && c->split[1].suspect == norigin)
++				bsrc[j] = si + 1;
++#endif
+ 
+ 			decref_split(potential);
+ 
+@@ -1983,10 +2163,21 @@ static int find_best_copies_in_diff(
+ 		}
+ 
+ 		origin_decref(norigin);
++#ifdef RB_TRACE
++		si++;
++#endif
+ 
+ 		if (error < 0)
+ 			return error;
+ 	}
++#ifdef RB_TRACE
++	if (tf) {
++		git_array_foreach(*candidates, j, c)
++			rbt_best(tf, blame, j, c->ent, c->split, bsrc[j]);
++		fprintf(tf, "E\n");
++		git__free(bsrc);
++	}
++#endif
+ 
+ 	return 0;
+ }
+@@ -2302,6 +2493,20 @@ static int find_best_copies_in_list(
+ 				goto done;
+ 		}
+ 	}
++#ifdef RB_TRACE
++	FILE *tf = rbt_file();
++	size_t si = 0, *bsrc = NULL;
++
++	if (tf) {
++		fprintf(tf, "R L %u %zu %d\n", threshold, ncand, (int)prune);
++		git_array_foreach(*candidates, j, c) {
++			fprintf(tf, "C %zu", j);
++			rbt_entry(tf, blame, c->ent);
++			fprintf(tf, "\n");
++		}
++		bsrc = git__calloc(ncand + 1, sizeof(size_t));
++	}
++#endif
+ 
+ 	for (i = 0; i < list->count; i++) {
+ 		const blame_source *s = &list->sources[i];
+@@ -2310,6 +2515,28 @@ static int find_best_copies_in_list(
+ 
+ 		if (porigin && !strcmp(s->path, porigin->path))
+ 			continue;
++#ifdef RB_TRACE
++		if (tf && !norigin) {
++			git_commit *commit = NULL;
++			git_blob *blob = NULL;
++			if (git_blob_lookup(&blob, blame->repository, &s->id) < 0 ||
++			    git_commit_dup(&commit, parent) < 0 ||
++			    new_origin(&norigin, commit, blob, s->path, s->mode) < 0) {
++				fprintf(tf, "TRACE-ERROR\n");
++				norigin = NULL;
++			} else {
++				fill_origin_blob(norigin, &file_p);
++			}
++		}
++		if (tf) {
++			char hex[GIT_OID_MAX_HEXSIZE + 1];
++			git_oid_tostr(hex, sizeof(hex), &s->id);
++			fprintf(tf, "S %zu %s %d", si, hex, (int)s->filtered);
++			rbt_lines(tf, norigin ? file_p.ptr : NULL,
++				norigin ? (size_t)file_p.size : 0);
++			fprintf(tf, "\n");
++		}
++#endif
+ 
+ 		git_array_foreach(*candidates, j, c) {
+ 			unsigned bar = threshold;
+@@ -2319,6 +2546,15 @@ static int find_best_copies_in_list(
+ 				bar = best[j] - 1;
+ 
+ 			blame->cache_counts.checks++;
++#ifdef RB_TRACE
++			if (tf) {
++				int pr = prune && s->filtered &&
++					!blame_source_can_match(s, &lines[j], bar);
++				fprintf(tf, "P %zu %zu %d %u", si, j, pr, bar);
++				rbt_regions(tf, blame, c->ent, norigin, &file_p);
++				fprintf(tf, "\n");
++			}
++#endif
+ 			if (prune && s->filtered &&
+ 			    !blame_source_can_match(s, &lines[j], bar)) {
+ 				blame->cache_counts.pruned++;
+@@ -2373,6 +2609,10 @@ static int find_best_copies_in_list(
+ #endif
+ 				copy_split_if_better(blame, c->split, potential);
+ 				best[j] = blame_entry_score(blame, &c->split[1]);
++#ifdef RB_TRACE
++				if (tf && c->split[1].suspect == norigin)
++					bsrc[j] = si + 1;
++#endif
+ 			}
+ 
+ 			decref_split(potential);
+@@ -2382,10 +2622,21 @@ static int find_best_copies_in_list(
+ 		}
+ 
+ 		origin_decref(norigin);
++#ifdef RB_TRACE
++		si++;
++#endif
+ 
+ 		if (error < 0)
+ 			goto done;
+ 	}
++#ifdef RB_TRACE
++	if (tf) {
++		git_array_foreach(*candidates, j, c)
++			rbt_best(tf, blame, j, c->ent, c->split, bsrc[j]);
++		fprintf(tf, "E\n");
++		git__free(bsrc);
++	}
++#endif
+ 
+ done:
+ 	if (lines) {
