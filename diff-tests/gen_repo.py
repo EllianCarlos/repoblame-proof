@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Make a tiny random git repository that stresses the copy search.
 
-usage: gen_repo.py <dir> <seed>
+usage: gen_repo.py <dir> <seed> [wide]
+
+With "wide": 15-30 files of 20-80 lines, and new files made from many
+blocks of other files (a small copy of the Playbook.java case).
 
 The repository has 5-12 text files and 15-40 commits.  The lines come
 from a small vocabulary, so that many files have the same blocks (ties
@@ -42,6 +45,8 @@ def git(d, *args, env=None):
 
 def main():
     d, seed = sys.argv[1], int(sys.argv[2])
+    wide = len(sys.argv) > 3 and sys.argv[3] == "wide"
+    nfiles_max = 30 if wide else 12
     rng = random.Random(seed)
     vocab = make_vocab(rng)
     os.makedirs(d, exist_ok=True)
@@ -88,16 +93,16 @@ def main():
         git(d, "add", "-A", env=env)
         git(d, "commit", "-q", "--allow-empty", "-m", msg, env=env)
 
-    for _ in range(rng.randint(2, 4)):
-        files[newname()] = random_lines(rng.randint(5, 25))
+    for _ in range(rng.randint(15, 30) if wide else rng.randint(2, 4)):
+        files[newname()] = random_lines(rng.randint(20, 80) if wide else rng.randint(5, 25))
     commit("root")
 
     def op():
         k = rng.random()
         paths = sorted(files)
-        if k < 0.12 and len(files) < 12:
+        if k < 0.12 and len(files) < nfiles_max:
             ls = []
-            for _ in range(rng.randint(1, 4)):
+            for _ in range(rng.randint(5, 20) if wide else rng.randint(1, 4)):
                 if paths and rng.random() < 0.7:
                     ls += block(files[rng.choice(paths)])
                 else:

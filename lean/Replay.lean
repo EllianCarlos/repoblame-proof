@@ -167,6 +167,9 @@ structure Stats where
   moveDecBad : Nat := 0
   movePruned : Nat := 0
   moveSoundBad : Nat := 0    -- Lean says prune but the move is taken
+  ties : Nat := 0            -- candidates with 2+ sources at the best score, above the threshold
+  barRaised : Nat := 0       -- decisions with bar > threshold
+  skipAtRaisedBar : Nat := 0 -- skips with bar > threshold (branch and bound, not only the threshold)
   msgs : Array String := #[]
 
 def Stats.note (s : Stats) (m : String) : Stats :=
@@ -216,6 +219,13 @@ def checkRound (st : Stats) (r : Round) : Stats := Id.run do
         | some f => !canMatch lv (cBloom.mem f) b cand
       xs := xs.push (prune, pot)
     let refRes := refFold sc (xs.toList.map Prod.snd)
+    match refRes with
+    | some b =>
+      let n := (xs.toList.filter (fun x => match x.2 with
+        | some p => sc p == sc b
+        | none => false)).length
+      if n ≥ 2 && decide (r.thr < sc b) then st := { st with ties := st.ties + 1 }
+    | none => pure ()
     let optRes := optFold sc r.thr xs.toList
     let withScore := fun (o : Option Split) => o.map (fun s => (s, sc s))
     -- C result
@@ -252,6 +262,9 @@ def checkRound (st : Stats) (r : Round) : Stats := Id.run do
         let b := bar r.thr ob
         let dec := x.1 b
         if dec then st := { st with prunedPairs := st.prunedPairs + 1 }
+        if decide (r.thr < b) then
+          st := { st with barRaised := st.barRaised + 1 }
+          if dec then st := { st with skipAtRaisedBar := st.skipAtRaisedBar + 1 }
         st := { st with decisions := st.decisions + 1 }
         match cdec[k]? with
         | some (some cp, some cb) =>
@@ -350,7 +363,7 @@ def crossCheck (a b : Array Ev) : Nat × Nat × Array String := Id.run do
   return (ok, bad, msgs)
 
 def printStats (name : String) (s : Stats) : IO Unit := do
-  IO.println s!"{name}\trounds={s.rounds}\tcands={s.cands}\tpairs={s.pairs}\tregions={s.regions}\tregion_bad={s.regionBad}\tbound_checks={s.boundChecks}\tbound_bad={s.boundBad}\tref_vs_c={s.refVsC}\tref_vs_c_bad={s.refVsCBad}\topt_vs_c={s.optVsC}\topt_vs_c_bad={s.optVsCBad}\tdecisions={s.decisions}\tdecision_bad={s.decisionBad}\tpruned={s.prunedPairs}\taccept_eq={s.acceptEq}\taccept_bad={s.acceptBad}\tc_accept_ref={s.cAcceptRef}\tc_accept_ref_bad={s.cAcceptRefBad}\tmoves={s.moves}\tmove_ref_bad={s.moveRefBad}\tmove_dec={s.moveDec}\tmove_dec_bad={s.moveDecBad}\tmove_pruned={s.movePruned}\tmove_sound_bad={s.moveSoundBad}"
+  IO.println s!"{name}\trounds={s.rounds}\tcands={s.cands}\tpairs={s.pairs}\tregions={s.regions}\tregion_bad={s.regionBad}\tbound_checks={s.boundChecks}\tbound_bad={s.boundBad}\tref_vs_c={s.refVsC}\tref_vs_c_bad={s.refVsCBad}\topt_vs_c={s.optVsC}\topt_vs_c_bad={s.optVsCBad}\tdecisions={s.decisions}\tdecision_bad={s.decisionBad}\tpruned={s.prunedPairs}\taccept_eq={s.acceptEq}\taccept_bad={s.acceptBad}\tc_accept_ref={s.cAcceptRef}\tc_accept_ref_bad={s.cAcceptRefBad}\tmoves={s.moves}\tmove_ref_bad={s.moveRefBad}\tmove_dec={s.moveDec}\tmove_dec_bad={s.moveDecBad}\tmove_pruned={s.movePruned}\tmove_sound_bad={s.moveSoundBad}\tties={s.ties}\tbar_raised={s.barRaised}\tskip_raised={s.skipAtRaisedBar}"
   for m in s.msgs do IO.println s!"  ! {m}"
 
 def main (args : List String) : IO UInt32 := do
