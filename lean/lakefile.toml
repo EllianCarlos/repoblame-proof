@@ -1,0 +1,10 @@
+name = "RepoblameProof"
+version = "0.1.0"
+defaultTargets = ["RepoblameProof", "replay"]
+
+[[lean_lib]]
+name = "RepoblameProof"
+
+[[lean_exe]]
+name = "replay"
+root = "Replay"
