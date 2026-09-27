@@ -44,7 +44,67 @@ false negatives. (2) is proved for the C filter, for any hash function.
 - The base port (per-file libgit2 blame = git) is tested (317,573 lines
   in the earlier work, and the runs here), not proved.
 
-RESULTS_PLACEHOLDER
+## Results
+
+### End to end (`diff-tests/run_diff.py`, the unchanged C code)
+
+| set | repositories | file blames | lines per variant | cache variants vs reference (4 variants) | reference vs git 2.55.0 |
+|---|---|---|---|---|---|
+| fixture `blamecopies.git` | 1 | 210 | 1,530 | 0 lines differ | 0 lines differ |
+| random tiny (`r0001`-`r0200`) | 200 | 14,490 | 248,770 | 0 lines differ | 0 lines differ |
+| wide (`w5001`-`w5030`) | 30 | 7,820 | 412,840 | 0 lines differ | 0 lines differ |
+| total | 231 | 22,520 | 663,140 | 0 of 2,652,560 line comparisons | 0 of 663,140 |
+
+Each row covers 10 option sets. In the random set, the copy search is
+active: with `-C`, 38.0% of the lines come from another path (23.9% with
+no option, from renames alone); with `-C10`, 60.2%.
+
+Thread stress (`diff-tests/stress_threads.sh`, `stress.tsv`): each file
+listed 20 times in a shuffled list, 2 threads, cache limit 1 byte and
+64 KiB, 10 repositories, `-C100` and `-C -C -C`: 12,720 blames, 0 differ
+from the reference.
+
+`libgit2_tests -sblame` on the built commit: 57 of 57 pass.
+
+### Lean replay of the C traces (`trace_batch.sh`, `lean/Replay.lean`)
+
+231 repositories (the fixture, `r0001`-`r0200`, `w5001`-`w5030`), 9
+option sets, each traced without and with the cache. Totals for the 8
+option sets without `-w`:
+
+| check | count | failures |
+|---|---|---|
+| copy rounds / candidate searches | 42,677 / 61,636 | - |
+| (candidate, source) pairs | 408,103 | - |
+| regions valid (`DiffValid`) | 689,227 | 0 |
+| bound at the tightest bar, `canMatch(score - 1) = true` | 603,198 | 0 |
+| Lean reference fold = C `find_best_copies_in_diff` | 61,636 | 0 |
+| Lean pruned fold = C `find_best_copies_in_list` (the same split, not only the same accepted split) | 61,636 | 0 |
+| Lean skip decision and bar = C decision and bar | 408,103 | 0 |
+| accepted split: pruned = reference (theorem instance, Lean) | 61,636 | 0 |
+| accepted split: C with cache = Lean reference | 61,636 | 0 |
+| move entries: Lean split = C split | 153,690 | 0 |
+| move entries: Lean skip decision = C decision | 153,690 | 0 |
+| move entries that the filter skips, but that move | 65,804 skipped | 0 |
+| run without cache vs run with cache: same rounds, same moves, same accepted splits | 196,367 | 0 |
+
+The pruning is real in these data: 219,101 of the 408,103 pairs are
+skipped (53.7%); 122,697 skips happen at a bar above the threshold (the
+branch-and-bound part, not only the threshold test); 19,559 candidates
+have two or more sources with the best score above the threshold, so the
+tie rule decides.
+
+With `-w -C`: 679 of 65,152 regions are not byte-equal (`DiffValid` is
+false, as expected). The C code turns the filter off there: 0 skips. All
+selection checks still pass (7,485 candidate searches, 17,365 moves).
+
+Mutation check of the replay: a flipped skip decision, a changed source
+index, and a shifted region in a trace each give a failure
+(`decision_bad`, `ref_vs_c_bad`, `region_bad`).
+
+### Violations
+
+None. No case was found where the C code violates a proved property.
 
 ## Main theorem statements
 
@@ -237,5 +297,7 @@ See PRIOR-ART.md.
 2. Lean model and proofs: commits `322ea2b`, `49494f8`, `f0255f7`.
 3. Mapping and tests: commits `193a5f2`, `7df9766`.
 4. `libgit2_tests -sblame` on `work/build`: 57 of 57 pass.
-5. End-to-end batch (200 random repositories) and trace batch: see
-   "Results".
+5. 2026-09-27: end-to-end batch, wide repositories, thread stress, trace
+   batch and mutation check: see "Results". Raw rows are in
+   `diff-tests/results-*.tsv`, `diff-tests/trace-lane*.tsv`,
+   `diff-tests/stress.tsv`.
