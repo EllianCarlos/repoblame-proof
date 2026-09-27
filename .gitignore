@@ -4,3 +4,6 @@ diff-tests/out/
 diff-tests/repos/
 *.o
 diff-tests/errors-lane*.log
+diff-tests/__pycache__/
+diff-tests/errors-wide.log
+diff-tests/trace-lane2.tsv
