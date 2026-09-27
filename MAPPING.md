@@ -1,7 +1,7 @@
 # Mapping: Lean model and C code
 
 The C code is `src/libgit2/blame_git.c` at commit `3cbd497e5` (branch
-`exp/repo-blame` of `~/Projects/libgit2-work/libgit2-repoblame`). The
+[`exp/repo-blame`](https://github.com/EllianCarlos/libgit2/tree/exp/repo-blame) of EllianCarlos/libgit2). The
 line numbers are for that commit. The Lean files are in
 `lean/RepoblameProof/`.
 
@@ -13,7 +13,7 @@ not change that code.
 
 ## What repoblame changes
 
-`git -C libgit2-repoblame diff 1726b7074..3cbd497e5` changes only these
+`git diff 1726b7074..3cbd497e5`, in a clone of that branch, changes only these
 parts of the behaviour. All other changes are timers and counters
 (`GIT_BLAME_PROFILE`, `cache_counts`), which do not change results.
 

@@ -1,8 +1,8 @@
 # repoblame: equivalence proof, tests, and assumptions
 
-Subject: `repoblame`, the libgit2 branch `exp/repo-blame` at `3cbd497e5`
-(`~/Projects/libgit2-work/libgit2-repoblame`) and the driver
-`harness/repoblame.c`. The reference: the per-file blame of the same
+Subject: `repoblame`, the libgit2 branch
+[`exp/repo-blame`](https://github.com/EllianCarlos/libgit2/tree/exp/repo-blame) at `3cbd497e5`, and its driver
+`tools/repoblame/repoblame.c`. The reference: the per-file blame of the same
 library without a cache (`git_blame_file`, which is `blame->cache ==
 NULL`). Git itself is a second reference for the tests only.
 
@@ -262,7 +262,7 @@ Tools (all in this repository):
   unchanged code. `work/build-trace` has `diff-tests/trace.patch`
   (logging only, behind `RB_TRACE`; the traced outputs are equal to the
   untraced outputs).
-- `diff-tests/rbdrive.c`: a copy of `harness/repoblame.c` with one more
+- `diff-tests/rbdrive.c`: a copy of the driver `tools/repoblame/repoblame.c` with one more
   option, `-b BYTES` (the cache limit in bytes).
 - `diff-tests/gen_repo.py`: random tiny repositories (seeded). They have
   blocks that many files share (ties between sources), copies, moves,

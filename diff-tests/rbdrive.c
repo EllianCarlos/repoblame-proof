@@ -1,5 +1,6 @@
 /*
- * rbdrive: a copy of harness/repoblame.c (read only there) with one
+ * rbdrive: a copy of tools/repoblame/repoblame.c of libgit2
+ * branch exp/repo-blame, with one
  * more option, -b BYTES: the cache limit in bytes (to force evictions).
  *
  * repoblame: blame many files of one repository in one process, like
